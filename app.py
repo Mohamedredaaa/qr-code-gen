@@ -6,11 +6,14 @@ from PIL import Image, ImageOps, ImageDraw
 from PIL.Image import Resampling
 from flask import Flask, render_template, request, flash, redirect, url_for
 from io import BytesIO
+import os
 
 app = Flask(__name__)
-app.secret_key = 'your_secret_key'
 
-logging.basicConfig(level=logging.DEBUG)
+# Use environment variable for secret key
+app.secret_key = os.getenv("SECRET_KEY", "default_secret_key")
+
+logging.basicConfig(level=logging.INFO)
 
 def remove_background(logo_img):
     logo_img = logo_img.convert("RGBA")
@@ -54,7 +57,7 @@ def index():
             border_color = request.form.get("border_color", "#FFFFFF")
             border_width = int(request.form.get("border_width", 10))
 
-            logging.debug(f"Data received: {data}, Logo: {logo}, Color: {color}, Size: {size}, Border Color: {border_color}, Border Width: {border_width}")
+            logging.info(f"Data received: {data}, Logo: {logo}, Color: {color}, Size: {size}, Border Color: {border_color}, Border Width: {border_width}")
 
             if not data or (not re.match(r"^(https?|ftp)://[^\s/$.?#].[^\s]*$", data) and not re.match(r"^[a-zA-Z0-9\s]+$", data)):
                 flash("Invalid URL or text format", "danger")
@@ -73,13 +76,11 @@ def index():
             back_rgb = (255, 255, 255)
 
             img = qr.make_image(fill_color=fill_rgb, back_color=back_rgb).convert("RGBA")
-            logging.debug(f"QR Code image created with color: {fill_rgb}")
+            logging.info(f"QR Code image created with color: {fill_rgb}")
 
             if logo:
                 try:
-                    # Check if the uploaded file is an SVG
                     if logo.filename.lower().endswith('.svg'):
-                        # Convert SVG to PNG using CairoSVG
                         svg_bytes = logo.read()
                         png_bytes = BytesIO()
                         cairosvg.svg2png(bytestring=svg_bytes, write_to=png_bytes)
@@ -93,7 +94,7 @@ def index():
                     logo_img = logo_img.resize((logo_size, logo_size), Resampling.LANCZOS)
 
                     img = add_logo_with_border(img, logo_img, border_color=border_color, border_width=border_width)
-                    logging.debug("Logo with border added to QR code")
+                    logging.info("Logo with border added to QR code")
 
                 except Exception as e:
                     flash(f"Error adding logo: {e}", "danger")
@@ -102,7 +103,7 @@ def index():
 
             qr_image_path = "static/qr_code.png"
             img.save(qr_image_path)
-            logging.debug("QR code saved successfully")
+            logging.info("QR code saved successfully")
 
         return render_template("index.html", qr_image=qr_image_path)
 
@@ -112,4 +113,5 @@ def index():
         return redirect(url_for("index"))
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    from waitress import serve  # type: ignore # Use Waitress for production
+    serve(app, host="0.0.0.0", port=int(os.getenv("PORT", 5000)))

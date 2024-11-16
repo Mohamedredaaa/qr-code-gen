@@ -16,6 +16,7 @@ app.secret_key = os.getenv("SECRET_KEY", "default_secret_key")
 logging.basicConfig(level=logging.INFO)
 
 def remove_background(logo_img):
+    """Removes the background of the logo image."""
     logo_img = logo_img.convert("RGBA")
     data = logo_img.getdata()
     new_data = []
@@ -28,6 +29,7 @@ def remove_background(logo_img):
     return logo_img
 
 def add_logo_with_border(qr_img, logo_img, border_color="#FFFFFF", border_width=10):
+    """Adds a logo with a border to the center of the QR code."""
     qr_width, qr_height = qr_img.size
     logo_width, logo_height = logo_img.size
 
@@ -41,11 +43,13 @@ def add_logo_with_border(qr_img, logo_img, border_color="#FFFFFF", border_width=
     return qr_img
 
 def hex_to_rgb(hex_color):
+    """Converts a hex color to RGB."""
     hex_color = hex_color.lstrip('#')
     return tuple(int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
+    """Handles QR code generation."""
     try:
         qr_image_path = None
 
@@ -113,5 +117,6 @@ def index():
         return redirect(url_for("index"))
 
 if __name__ == '__main__':
-    from waitress import serve  # type: ignore # Use Waitress for production
-    serve(app, host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
+    app.run(debug=True, host="0.0.0.0", port=5000)
+
+ 

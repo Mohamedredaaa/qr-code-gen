@@ -1,30 +1,20 @@
-# Use an official Python runtime as the base image
+# Use the official Python image from Docker Hub
 FROM python:3.9-slim
 
-# Set the working directory
+# Set the working directory inside the container
 WORKDIR /app
 
-# Install system dependencies required for pycairo and other libraries
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    libcairo2-dev \
-    libgirepository1.0-dev \
-    pkg-config \
-    python3-dev \
-    libffi-dev \
-    && apt-get clean
-
-# Copy the requirements file
+# Copy the requirements.txt file to the container
 COPY requirements.txt .
 
-# Install Python dependencies
+# Install dependencies inside the container
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application code
+# Copy the rest of the application code to the container
 COPY . .
 
 # Expose the port Flask will run on
 EXPOSE 5000
 
-# Start the Flask application
+# Command to run the application
 CMD ["python", "app.py"]

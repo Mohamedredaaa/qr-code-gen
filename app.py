@@ -1,105 +1,115 @@
-from flask import Flask, render_template, request, make_response, redirect, url_for
+import logging
 import qrcode
-from PIL import Image
-from PIL.Image import Resampling as ImageResampling
-import os
+import re  # Import regular expressions
+import cairosvg  # For SVG to PNG conversion
+from PIL import Image, ImageOps, ImageDraw
+from PIL.Image import Resampling
+from flask import Flask, render_template, request, flash, redirect, url_for
+from io import BytesIO
 
-# Initialize Flask app
 app = Flask(__name__)
+app.secret_key = 'your_secret_key'
 
-# Set upload folder for QR codes and temporary logos
-UPLOAD_FOLDER = 'static/qr_codes'
-LOGO_FOLDER = 'static/uploads'
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(LOGO_FOLDER, exist_ok=True)
+logging.basicConfig(level=logging.DEBUG)
 
-# Allowed file extensions for uploads
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'bmp', 'gif'}
+def remove_background(logo_img):
+    logo_img = logo_img.convert("RGBA")
+    data = logo_img.getdata()
+    new_data = []
+    for item in data:
+        if item[3] < 100:  # If alpha is less than 100 (transparent)
+            new_data.append((255, 255, 255, 0))  # Make transparent pixels white
+        else:
+            new_data.append(item)
+    logo_img.putdata(new_data)
+    return logo_img
 
-# Check if file extension is allowed
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-# Helper function to add an image to the QR code
-def add_image_to_qr(qr_img, logo_path, size):
-    """
-    Add an image/logo to the center of the QR code.
-    """
-    logo = Image.open(logo_path).convert("RGBA")
-
-    # Resize logo dynamically based on the QR code size
+def add_logo_with_border(qr_img, logo_img, border_color="#FFFFFF", border_width=10):
     qr_width, qr_height = qr_img.size
-    logo_size = int(qr_width * size)  # Logo size is a percentage of QR code size
-    logo = logo.resize((logo_size, logo_size), ImageResampling.LANCZOS)
+    logo_width, logo_height = logo_img.size
 
-    # Position the logo at the center of the QR code
-    logo_pos = ((qr_width - logo_size) // 2, (qr_height - logo_size) // 2)
-    qr_img.paste(logo, logo_pos, mask=logo)
+    pos_x = (qr_width - logo_width) // 2
+    pos_y = (qr_height - logo_height) // 2
 
+    border_img = Image.new("RGBA", (logo_width + 2 * border_width, logo_height + 2 * border_width), border_color)
+    border_img.paste(logo_img, (border_width, border_width), logo_img)
+
+    qr_img.paste(border_img, (pos_x - border_width, pos_y - border_width), border_img)
     return qr_img
 
-@app.route("/", methods=["GET", "POST"])
+def hex_to_rgb(hex_color):
+    hex_color = hex_color.lstrip('#')
+    return tuple(int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
+
+@app.route('/', methods=['GET', 'POST'])
 def index():
-    if request.method == "POST":
-        input_text = request.form.get("text")
-        fg_color = request.form.get("fg_color", "black")  # Default foreground color is black
-        bg_color = request.form.get("bg_color", "white")  # Default background color is white
-        logo_size = float(request.form.get("logo_size", 0.2))  # Default logo size is 20%
-        qr_size = int(request.form.get("qr_size", 10))  # Default QR code box size is 10
-        logo_file = request.files.get("logo")
+    try:
+        qr_image_path = None
 
-        if not input_text:
-            return render_template("index.html", error="Please enter text or URL to generate QR code.")
+        if request.method == "POST":
+            data = request.form.get("data")
+            logo = request.files.get("logo")
+            color = request.form.get("color", "#000000")
+            size = int(request.form.get("size", 300))
+            border_color = request.form.get("border_color", "#FFFFFF")
+            border_width = int(request.form.get("border_width", 10))
 
-        try:
-            # Generate QR code with custom colors and size
+            logging.debug(f"Data received: {data}, Logo: {logo}, Color: {color}, Size: {size}, Border Color: {border_color}, Border Width: {border_width}")
+
+            if not data or (not re.match(r"^(https?|ftp)://[^\s/$.?#].[^\s]*$", data) and not re.match(r"^[a-zA-Z0-9\s]+$", data)):
+                flash("Invalid URL or text format", "danger")
+                return redirect(url_for("index"))
+
             qr = qrcode.QRCode(
                 version=1,
-                error_correction=qrcode.constants.ERROR_CORRECT_H,  # High error correction
-                box_size=qr_size,
+                error_correction=qrcode.constants.ERROR_CORRECT_H,
+                box_size=10,
                 border=4,
             )
-            qr.add_data(input_text)
+            qr.add_data(data)
             qr.make(fit=True)
-            qr_img = qr.make_image(fill_color=fg_color, back_color=bg_color).convert("RGBA")
 
-            # Handle logo upload if provided
-            if logo_file and logo_file.filename:
-                if allowed_file(logo_file.filename):
-                    logo_path = os.path.join(LOGO_FOLDER, logo_file.filename)
-                    logo_file.save(logo_path)
+            fill_rgb = hex_to_rgb(color)
+            back_rgb = (255, 255, 255)
 
-                    # Add logo to the QR code
-                    qr_img = add_image_to_qr(qr_img, logo_path, logo_size)
-                else:
-                    return render_template("index.html", error="Unsupported file format. Allowed formats: PNG, JPG, JPEG, BMP, GIF.")
+            img = qr.make_image(fill_color=fill_rgb, back_color=back_rgb).convert("RGBA")
+            logging.debug(f"QR Code image created with color: {fill_rgb}")
 
-            # Save the QR code image
-            qr_filename = f"qr_code_{hash(input_text)}.png"
-            qr_filepath = os.path.join(UPLOAD_FOLDER, qr_filename)
-            qr_img.save(qr_filepath)
+            if logo:
+                try:
+                    # Check if the uploaded file is an SVG
+                    if logo.filename.lower().endswith('.svg'):
+                        # Convert SVG to PNG using CairoSVG
+                        svg_bytes = logo.read()
+                        png_bytes = BytesIO()
+                        cairosvg.svg2png(bytestring=svg_bytes, write_to=png_bytes)
+                        png_bytes.seek(0)
+                        logo_img = Image.open(png_bytes)
+                    else:
+                        logo_img = Image.open(logo)
 
-            return render_template("index.html", qr_code=qr_filename)
-        except Exception as e:
-            return render_template("index.html", error=f"Error generating QR code: {e}")
+                    logo_img = remove_background(logo_img)
+                    logo_size = int(size * 0.2)
+                    logo_img = logo_img.resize((logo_size, logo_size), Resampling.LANCZOS)
 
-    return render_template("index.html")
+                    img = add_logo_with_border(img, logo_img, border_color=border_color, border_width=border_width)
+                    logging.debug("Logo with border added to QR code")
 
-@app.route("/download/<filename>")
-def download_qr(filename):
-    """
-    Serve the QR code file directly for download in the browser.
-    """
-    filepath = os.path.join(UPLOAD_FOLDER, filename)
-    try:
-        with open(filepath, "rb") as f:
-            response = make_response(f.read())
-            response.headers["Content-Type"] = "image/png"
-            response.headers["Content-Disposition"] = f"attachment; filename={filename}"
-            return response
-    except FileNotFoundError:
-        return redirect(url_for("index", error="File not found."))
+                except Exception as e:
+                    flash(f"Error adding logo: {e}", "danger")
+                    logging.error(f"Error adding logo: {e}")
+                    return redirect(url_for("index"))
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+            qr_image_path = "static/qr_code.png"
+            img.save(qr_image_path)
+            logging.debug("QR code saved successfully")
+
+        return render_template("index.html", qr_image=qr_image_path)
+
+    except Exception as e:
+        logging.error(f"Error processing QR code: {e}")
+        flash(f"An error occurred: {e}", "danger")
+        return redirect(url_for("index"))
+
+if __name__ == '__main__':
+    app.run(debug=True)

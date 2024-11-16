@@ -1,20 +1,28 @@
-# Use the official Python image from Docker Hub
 FROM python:3.9-slim
 
-# Set the working directory inside the container
+# Install system dependencies for cairosvg and pillow
+RUN apt-get update && apt-get install -y \
+    libcairo2 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libgdk-pixbuf2.0-0 \
+    libffi-dev \
+    libjpeg-dev \
+    zlib1g-dev \
+    && apt-get clean
+
+# Set the working directory
 WORKDIR /app
 
-# Copy the requirements.txt file to the container
+# Copy requirements and install dependencies
 COPY requirements.txt .
-
-# Install dependencies inside the container
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application code to the container
+# Copy the application code
 COPY . .
 
-# Expose the port Flask will run on
+# Expose the application port
 EXPOSE 5000
 
-# Command to run the application
+# Run the application
 CMD ["python", "app.py"]
